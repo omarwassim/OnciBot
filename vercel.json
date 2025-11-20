@@ -2,15 +2,12 @@
   "version": 2,
   "builds": [
     {
-      "src": "api/analyze.py",
+      "src": "api/detect.py",
       "use": "@vercel/python",
       "config": { "maxLambdaSize": "50mb" }
     }
   ],
   "routes": [
-    {
-      "src": "/api/analyze",
-      "dest": "api/analyze.py"
-    }
+    { "src": "/", "dest": "api/detect.py" }
   ]
 }
