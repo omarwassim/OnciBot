@@ -4,23 +4,13 @@ import re
 import json
 import numpy as np
 import requests
-from fastapi import FastAPI, Request
-from fastapi.middleware.cors import CORSMiddleware  # إضافة CORS
+from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sentence_transformers import SentenceTransformer
 from mangum import Mangum  # Vercel adapter
 
 app = FastAPI()
-
-# إضافة CORS middleware عشان POST requests
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # أو حدد n8n domain لو عايز أمان أكتر
-    allow_credentials=True,
-    allow_methods=["*"],  # يسمح POST, GET, etc.
-    allow_headers=["*"],
-)
 
 # DeepSeek API
 API_URL = "https://api-ap-southeast-1.modelarts-maas.com/v1/chat/completions"
