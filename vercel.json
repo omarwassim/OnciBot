@@ -4,10 +4,15 @@
     {
       "src": "api/detect.py",
       "use": "@vercel/python",
-      "config": { "maxLambdaSize": "50mb" }
+      "config": {
+        "maxLambdaSize": "50mb"
+      }
     }
   ],
   "routes": [
-    { "src": "/", "dest": "api/detect.py" }
+    {
+      "src": "/api/detect",
+      "dest": "api/detect.py"
+    }
   ]
 }
