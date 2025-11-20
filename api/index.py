@@ -5,14 +5,24 @@ import json
 import numpy as np
 import requests
 from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware  # إضافة CORS
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sentence_transformers import SentenceTransformer
-from mangum import Mangum  # مهم جدًا لـ Vercel
+from mangum import Mangum  # Vercel adapter
 
 app = FastAPI()
 
-# DeepSeek API Key من Environment Variables (أكتر أمان)
+# إضافة CORS middleware عشان POST requests
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # أو حدد n8n domain لو عايز أمان أكتر
+    allow_credentials=True,
+    allow_methods=["*"],  # يسمح POST, GET, etc.
+    allow_headers=["*"],
+)
+
+# DeepSeek API
 API_URL = "https://api-ap-southeast-1.modelarts-maas.com/v1/chat/completions"
 API_KEY = os.getenv("DEEPSEEK_API_KEY")
 
@@ -21,7 +31,7 @@ headers = {
     "Authorization": f"Bearer {API_KEY}",
 }
 
-# تحميل النموذج مرة واحدة فقط
+# تحميل النموذج
 print("جاري تحميل نموذج الـ embeddings...")
 model = SentenceTransformer('sentence-transformers/distiluse-base-multilingual-cased-v2')
 
@@ -39,7 +49,6 @@ SYMPTOMS = [
     {"key": "breath_shortness", "text": "ضيق تنفس"},
 ]
 
-# حساب الـ embeddings مرة واحدة
 symptom_texts = [s["text"] for s in SYMPTOMS]
 symptom_embeddings = model.encode(symptom_texts)
 
@@ -109,5 +118,5 @@ async def analyze(data: InputData):
         "raw_input": text
     }
 
-# Vercel entry point (أهم سطرين)
+# Vercel entry point
 handler = Mangum(app, lifespan="off")
