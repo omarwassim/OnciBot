@@ -1,112 +1,96 @@
-# api/analyze.py
+from flask import Flask, request, jsonify
 import os
-import re
-import json
-import numpy as np
 import requests
-from fastapi import FastAPI
-from fastapi.responses import JSONResponse
-from pydantic import BaseModel
 from sentence_transformers import SentenceTransformer
-from mangum import Mangum  # Vercel adapter
+import numpy as np
 
-app = FastAPI()
-
-# DeepSeek API
+# ----------------- DeepSeek Config -----------------
 API_URL = "https://api-ap-southeast-1.modelarts-maas.com/v1/chat/completions"
-API_KEY = os.getenv("DEEPSEEK_API_KEY")
+API_KEY = os.environ.get("DEEPSEEK_API_KEY")  # use Vercel environment variable
 
 headers = {
     "Content-Type": "application/json",
     "Authorization": f"Bearer {API_KEY}",
 }
 
-# تحميل النموذج
-print("جاري تحميل نموذج الـ embeddings...")
-model = SentenceTransformer('sentence-transformers/distiluse-base-multilingual-cased-v2')
+def deepseek_chat(prompt, system_prompt=None, max_tokens=512, temperature=0.3):
+    messages = []
+    if system_prompt:
+        messages.append({"role": "system", "content": system_prompt})
+    messages.append({"role": "user", "content": prompt})
 
+    payload = {
+        "model": "deepseek-v3.1",
+        "messages": messages,
+        "max_tokens": max_tokens,
+        "temperature": temperature,
+    }
+
+    try:
+        response = requests.post(API_URL, headers=headers, json=payload, timeout=60)
+        response.raise_for_status()
+        data = response.json()
+        return {"answer": data["choices"][0]["message"]["content"].strip()}
+    except requests.exceptions.RequestException as e:
+        return {"error": "DeepSeek API request failed", "details": str(e)}
+
+# ----------------- Symptoms -----------------
 SYMPTOMS = [
-    {"key": "abdominal_pain", "text": "ألم في البطن"}, {"key": "headache", "text": "صداع"},
-    {"key": "nausea", "text": "غثيان"}, {"key": "dry_mouth", "text": "جفاف الفم"},
-    {"key": "fever", "text": "حمى"}, {"key": "cough", "text": "سعال"},
-    {"key": "fatigue", "text": "إرهاق"}, {"key": "dizziness", "text": "دوخة"},
-    {"key": "voice_changes", "text": "تغيرات في جودة الصوت"}, {"key": "hoarseness", "text": "بحة الصوت"},
-    {"key": "taste_changes", "text": "تغير الطعم"}, {"key": "low_appetite", "text": "انخفاض الشهية"},
-    {"key": "vomiting", "text": "تقيؤ"}, {"key": "heartburn", "text": "حرقة صدر"},
-    {"key": "gas", "text": "الغازات"}, {"key": "bloating", "text": "الانتفاخ"},
-    {"key": "hiccups", "text": "زغطة"}, {"key": "constipation", "text": "امساك"},
-    {"key": "diarrhea", "text": "اسهال"}, {"key": "fecal_incontinence", "text": "سلس برازي"},
-    {"key": "breath_shortness", "text": "ضيق تنفس"},
+    {"key": "abdominal_pain", "text": "ألم في البطن"},
+    {"key": "headache", "text": "صداع"},
+    {"key": "nausea", "text": "غثيان"},
+    {"key": "dry_mouth", "text": "جفاف الفم"},
+    {"key": "fever", "text": "حمى"},
+    {"key": "cough", "text": "سعال"},
+    {"key": "fatigue", "text": "إرهاق"},
+    {"key": "dizziness", "text": "دوخة"},
+    {"key": "Voice quality changes", "text": "تغيرات في جودة الصوت"},
+    {"key": "Hoarseness", "text": "بحة الصوت"},
+    {"key": "Taste changes", "text": "تغير الطعم"},
+    {"key": "Decreased appetite", "text": "انخفاض الشهية"},
+    {"key": "Vomiting", "text": "تقيؤ"},
+    {"key": "Heartburn", "text": "حرقة صدر"},
+    {"key": "Gas", "text": "الغازات"},
+    {"key": "Bloating", "text": "الانتفاخ"},
+    {"key": "Hiccups", "text": "زغطة"},
+    {"key": "Constipation", "text": "امساك"},
+    {"key": "Diarrhea", "text": "اسهال"},
+    {"key": "Fecal incontinence", "text": "سلس برازي"},
+    {"key": "Shortness of breath", "text": "ضيق تنفس"},
 ]
 
+# ----------------- Embeddings -----------------
+model = SentenceTransformer('sentence-transformers/distiluse-base-multilingual-cased-v2')
 symptom_texts = [s["text"] for s in SYMPTOMS]
 symptom_embeddings = model.encode(symptom_texts)
 
-def cosine_sim(a, b):
-    return np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b))
+def detect_symptoms_embedding(user_text, top_k=3):
+    user_embedding = model.encode([user_text])[0]
+    def cosine_sim(a, b):
+        return np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b))
+    similarities = [cosine_sim(user_embedding, emb) for emb in symptom_embeddings]
+    top_indices = np.argsort(similarities)[::-1][:top_k]
+    detected = [{"key": SYMPTOMS[i]["key"], "text": SYMPTOMS[i]["text"], "similarity": float(similarities[i])} for i in top_indices]
+    return detected
 
-def detect_symptoms(user_text, threshold=0.18):
-    detected = set()
-    parts = re.split(r"[،,.\s!؟؛]+", user_text.lower())
-    for part in parts:
-        part = part.strip()
-        if len(part) < 3: continue
-        user_emb = model.encode([part])[0]
-        similarities = [cosine_sim(user_emb, emb) for emb in symptom_embeddings]
-        for idx, sim in enumerate(similarities):
-            if sim > threshold:
-                detected.add(SYMPTOMS[idx]["key"])
-    return list(detected)
+# ----------------- Flask App -----------------
+app = Flask(__name__)
 
-def deepseek_chat(prompt):
-    payload = {
-        "model": "deepseek-v3.1",
-        "messages": [
-            {"role": "system", "content": "أنت طبيب أورام متخصص، جاوب بالعربي الفصحى وباختصار شديد."},
-            {"role": "user", "content": prompt}
-        ],
-        "max_tokens": 600,
-        "temperature": 0.3
-    }
-    try:
-        r = requests.post(API_URL, headers=headers, json=payload, timeout=40)
-        if r.status_code == 200:
-            return r.json()["choices"][0]["message"]["content"].strip()
-        else:
-            return f"خطأ في الـ AI: {r.status_code}"
-    except:
-        return "تعذر الاتصال بـ DeepSeek مؤقتًا."
+@app.route("/api/detect", methods=["POST"])
+def detect():
+    data = request.get_json()
+    if not data or "text" not in data:
+        return jsonify({"error": "Missing 'text' in request body"}), 400
 
-class InputData(BaseModel):
-    symptoms: str
-    patient_phone: str = ""
+    user_text = data["text"]
+    detected_symptoms = detect_symptoms_embedding(user_text)
+    deepseek_answer = deepseek_chat(user_text)
 
-@app.post("/api/analyze")
-async def analyze(data: InputData):
-    text = data.symptoms.strip()
-    if not text:
-        return JSONResponse({"error": "الأعراض فارغة"}, status_code=400)
+    return jsonify({
+        "input": user_text,
+        "detected_symptoms": detected_symptoms,
+        "deepseek_answer": deepseek_answer
+    })
 
-    detected = detect_symptoms(text)
-    
-    if not detected:
-        response = "لم أتمكن من التعرف على أعراض واضحة، ممكن توضح أكتر؟"
-        risk = "منخفضة"
-    else:
-        symptoms_ar = "، ".join([s["text"] for s in SYMPTOMS if s["key"] in detected])
-        prompt = f"المريض يعاني: {text}\nالأعراض المكتشفة: {symptoms_ar}\n\nأجب بالعربي فقط:\n1. الاحتمالات الطبية\n2. درجة الخطورة: منخفضة/متوسطة/عالية/طوارئ\n3. التوصية الفورية"
-        response = deepseek_chat(prompt)
-        risk = "طوارئ" if any(w in response for w in ["طوارئ","فورًا","مستشفى","نزيف"]) else \
-               "عالية" if any(w in response for w in ["عالية","خطير","سرطان"]) else \
-               "متوسطة" if "متوسطة" in response else "منخفضة"
-
-    return {
-        "medical_response": response,
-        "detected_symptoms": detected,
-        "risk_level": risk,
-        "patient_phone": data.patient_phone,
-        "raw_input": text
-    }
-
-# Vercel entry point
-handler = Mangum(app, lifespan="off")
+# ----------------- Vercel Entry Point -----------------
+# Vercel automatically looks for `app` object in the file.
