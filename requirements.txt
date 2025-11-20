@@ -1,8 +1,8 @@
 fastapi
 uvicorn[standard]
 sentence-transformers
+torch
 numpy
 requests
-torch
 pydantic
-dotenv
+mangum
